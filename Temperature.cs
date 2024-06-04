@@ -12,13 +12,22 @@ namespace Temperature_Consumer
         private List<List<IncidentModel>> allIncidents = new List<List<IncidentModel>>();
         private List<IncidentModel> temperatureIncidents = new List<IncidentModel>();
         internal DateTime lastExecutionTime = DateTime.MinValue;
-        int thresholdTime = 10;
-        int thresholdTemperature = 45;
+        int thresholdTime;
+        int thresholdTemperature;
         private NpgsqlConnection connection;
 
-        internal async Task dataConsumer(ConsumerConfig _config, IConfiguration _configuration, NpgsqlConnection _connection)
+        internal async Task start(ConsumerConfig _config, IConfiguration _configuration, NpgsqlConnection _connection)
         {
+            Console.WriteLine("Temperature Consumer Started...");
             connection = _connection;
+            Console.WriteLine("Configuration Checking...");
+            checkConfiguration();
+            Console.WriteLine("Configuration Fetched Successfully...");
+            Console.WriteLine("Data Consuming Started...");
+            await dataConsumer(_config, _configuration);
+        }
+        private async Task dataConsumer(ConsumerConfig _config, IConfiguration _configuration)
+        {
             using (var consumer = new ConsumerBuilder<Ignore, string>(_config).Build())
             {
                 consumer.Subscribe(_configuration["BootstrapService:Topic"]);
@@ -57,17 +66,7 @@ namespace Temperature_Consumer
         {
             if ((DateTime.Now - lastExecutionTime).TotalSeconds >= thresholdTime)
             {
-
-                DateTime startTime = dataList.Min(d => DateTime.Parse(d.TimeStamp.ToString()));
-                DateTime endTime = dataList.Max(d => DateTime.Parse(d.TimeStamp.ToString()));
-
                 var groupedData = dataList.GroupBy(d => d.PollNumber);
-
-                Console.Clear();
-                Console.WriteLine($"\nThreshold Time = {thresholdTime} seconds");
-                Console.WriteLine($"Threshold Speed = {thresholdTemperature} °C");
-                double averageSpeed = dataList.Average(d => d.Temperature);
-                Console.WriteLine($"Total Temperature Pools = {groupedData.Count()}\n");
 
                 List<IncidentModel> incidents = new List<IncidentModel>();
                 foreach (var group in groupedData)
@@ -79,51 +78,14 @@ namespace Temperature_Consumer
                         Area="",
                         Description="",
                         Threshold = thresholdTemperature,
-                        StartTime = startTime,
-                        EndTime = endTime
-                    };
+                        StartTime = dataList.Min(d => DateTime.Parse(d.TimeStamp.ToString())),
+                        EndTime = dataList.Max(d => DateTime.Parse(d.TimeStamp.ToString()))
+                };
                     incidents.Add(incident);
                 }
-
-                allIncidents.Add(incidents);
-
-                foreach (var batchIncidents in allIncidents)
-                {
-                    Console.ForegroundColor = ConsoleColor.Blue;
-                    Console.WriteLine("---------------------------------------------------------------------------------------------------------");
-                    Console.WriteLine($"| {"Poll Number",-15} | {"Area",-15} | {"Average Temperature",-12} | {"Start Time",-20} | {"End Time",-20} |");
-                    Console.WriteLine("---------------------------------------------------------------------------------------------------------");
-                    Console.ResetColor();
-
-                    foreach (var incident in batchIncidents)
-                    {
-                        if (incident.AverageTemperature > thresholdTemperature)
-                        {
-                            Console.ForegroundColor = ConsoleColor.Black;
-                            Console.BackgroundColor = ConsoleColor.Red;
-                            temperatureIncidents.Add(incident);
-                        }
-                        else if (thresholdTemperature - incident.AverageTemperature <= 5)
-                        {
-                            Console.ForegroundColor = ConsoleColor.Yellow;
-                        }
-                        else
-                        {
-                            Console.ForegroundColor = ConsoleColor.Green;
-                        }
-
-                        Console.WriteLine($"| {incident.PollNumber,-15} | {incident.Area,-15} | {incident.AverageTemperature.ToString("F2")} {" °C",-14}| {incident.StartTime,-20} | {incident.EndTime,-20} |");
-                        Console.ResetColor();
-                    }
-
-                    await saveIncidents();
-                    Console.ForegroundColor = ConsoleColor.Blue;
-                    Console.WriteLine("---------------------------------------------------------------------------------------------------------");
-                    Console.ResetColor();
-                    Console.Write("Loading...");
-                }
-
                 dataList.Clear();
+                allIncidents.Add(incidents);
+                displayData(groupedData.Count());
                 allIncidents.Clear();
                 await checkConfiguration();
                 lastExecutionTime = DateTime.Now;
@@ -156,7 +118,7 @@ namespace Temperature_Consumer
             }
         }
 
-        internal async Task checkConfiguration()
+        private async Task checkConfiguration()
         {
             using (NpgsqlCommand cmd = new NpgsqlCommand($"select * from configurations where configurationid=2 and isdeleted=false;", connection))
             {
@@ -168,7 +130,50 @@ namespace Temperature_Consumer
                         thresholdTime = reader.GetInt32(3);
                     }
                 }
+            }
+        }
 
+        private async Task displayData(int count) {
+            Console.Clear();
+            Console.WriteLine($"\nThreshold Time = {thresholdTime} seconds");
+            Console.WriteLine($"Threshold Speed = {thresholdTemperature} °C");
+            double averageSpeed = dataList.Average(d => d.Temperature);
+            Console.WriteLine($"Total Temperature Pools = {count}\n");
+
+            foreach (var batchIncidents in allIncidents)
+            {
+                Console.ForegroundColor = ConsoleColor.Blue;
+                Console.WriteLine("---------------------------------------------------------------------------------------------------------");
+                Console.WriteLine($"| {"Poll Number",-15} | {"Area",-15} | {"Average Temperature",-12} | {"Start Time",-20} | {"End Time",-20} |");
+                Console.WriteLine("---------------------------------------------------------------------------------------------------------");
+                Console.ResetColor();
+
+                foreach (var incident in batchIncidents)
+                {
+                    if (incident.AverageTemperature > thresholdTemperature)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Black;
+                        Console.BackgroundColor = ConsoleColor.Red;
+                        temperatureIncidents.Add(incident);
+                    }
+                    else if (thresholdTemperature - incident.AverageTemperature <= 5)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                    }
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                    }
+
+                    Console.WriteLine($"| {incident.PollNumber,-15} | {incident.Area,-15} | {incident.AverageTemperature.ToString("F2")} {" °C",-14}| {incident.StartTime,-20} | {incident.EndTime,-20} |");
+                    Console.ResetColor();
+                }
+
+                await saveIncidents();
+                Console.ForegroundColor = ConsoleColor.Blue;
+                Console.WriteLine("---------------------------------------------------------------------------------------------------------");
+                Console.ResetColor();
+                Console.Write("Loading...");
             }
         }
     }

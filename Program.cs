@@ -26,9 +26,9 @@ namespace Temperature_Consumer
                 using (var connection = new NpgsqlConnection(connectionString))
                 {
                     connection.Open();
+                    Console.WriteLine("Database Connection Successfull...");
                     Temperature temperature = new Temperature();
-                    temperature.checkConfiguration();
-                    await temperature.dataConsumer(config, configuration, connection);
+                    temperature.start(config, configuration, connection);
                 }
 
                 Console.ReadKey();
